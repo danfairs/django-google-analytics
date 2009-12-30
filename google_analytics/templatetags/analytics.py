@@ -1,63 +1,61 @@
 from django.contrib.sites.models import Site
-from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
-from django.template import Library, Node, TemplateSyntaxError, Variable, \
-                            loader
-from django.utils.safestring import mark_safe
+from django.contrib.sites.models import Site
+from django.template import Context, loader
 
+register = template.Library()
+Analytics = models.get_model('googleanalytics', 'analytics')
 
-register = Library()
-
-
-class AnalyticsNode(Node):
-    def __init__(self, code=None):
-        self.code = code
-
-    def render(self, context):
-        # Tries to get code value as template tag argument
-        if self.code is not None:
-            code = Variable(self.code).resolve(context)
-        else:
-            code = self.code
-
-        # If no code came with the template, try getting it from settings.py
-        if not code:
-            code = getattr(settings, 'GOOGLE_ANALYTICS_CODE', False)
-
-        # If no code is available in the settings, try getting one from
-        # the site-model-based analytics setting.
-        if not code and getattr(settings, 'GOOGLE_ANALYTICS_MODEL', False):
-            site = Site.objects.get_current()
-
-            try:
-                code = site.analytics.code
-            except ObjectDoesNotExist:
-                # If Analytics model object has not been created.
-                pass
-            except AttributeError:
-                # If the Analytics model is not loaded.
-                pass
-
-        if not code:
-            return u''
-
-        return mark_safe(loader.render_to_string(
-            'google_analytics/analytics_template.html',
-            {'analytics_code': code},
-        ))
-
-
-def do_analytics(parser, token):
-    code = None
+def do_get_analytics(parser, token):
     contents = token.split_contents()
-
+    tag_name = contents[0]
+    template_name = 'google_analytics/%s_template.html' % tag_name
     if len(contents) == 2:
+        # split_contents() knows not to split quoted strings.
         code = contents[1]
-    elif len(contents) != 1:
-        raise TemplateSyntaxError, 'Usage: {% analytics ["UA-xxxxxx-x"] %}'
+    elif len(contents) == 1:
+        code = None
+    else:
+        raise template.TemplateSyntaxError, "%r cannot take more than one argument" % tag_name
+   
+    if not code:
+        current_site = Site.objects.get_current()
+    else:
+        if not (code[0] == code[-1] and code[0] in ('"', "'")):
+            raise template.TemplateSyntaxError, "%r tag's argument should be in quotes" % tag_name
+        code = code[1:-1]
+        current_site = None
 
-    return AnalyticsNode(code)
-
-register.tag('analytics', do_analytics)
+    return AnalyticsNode(current_site, code, template_name)
+    
+class AnalyticsNode(template.Node):
+    def __init__(self, site=None, code=None, template_name='google_analytics/analytics_template.html'):
+        self.site = site
+        self.code = code
+        self.template_name = template_name
+        
+    def render(self, context):
+        content = ''
+        if self.site:
+            code_set = self.site.analytics_set.all()
+            if code_set:
+                code = code_set[0].analytics_code
+            else:
+                return ''
+        elif self.code:
+            code = self.code
+        else:
+            return ''
+        
+        if code.strip() != '':
+            t = loader.get_template(self.template_name)
+            c = Context({
+                'analytics_code': code,
+            })
+            return t.render(c)
+        else:
+            return ''
+        
+register.tag('analytics', do_get_analytics)
+register.tag('analytics_async', do_get_analytics)
 
