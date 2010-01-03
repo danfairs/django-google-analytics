@@ -1,7 +1,7 @@
+from django import template
 from django.contrib.sites.models import Site
 from django.db import models
 from django.contrib.sites.models import Site
-from django.template import Context, loader
 
 register = template.Library()
 Analytics = models.get_model('googleanalytics', 'analytics')
@@ -48,8 +48,8 @@ class AnalyticsNode(template.Node):
             return ''
         
         if code.strip() != '':
-            t = loader.get_template(self.template_name)
-            c = Context({
+            t = template.loader.get_template(self.template_name)
+            c = template.Context({
                 'analytics_code': code,
             })
             return t.render(c)
